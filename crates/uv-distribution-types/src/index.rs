@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 use url::Url;
 
+use uv_auth::oidc::OidcConfig;
 use uv_auth::{AuthPolicy, Credentials};
 use uv_redacted::DisplaySafeUrl;
 use uv_small_str::SmallString;
@@ -206,6 +207,23 @@ pub struct Index {
     /// ```
     #[serde(default)]
     pub authenticate: AuthPolicy,
+    /// OIDC configuration for device authorization login.
+    ///
+    /// When set, `uv auth login` will use these parameters for the OIDC device
+    /// authorization flow (RFC 8628) instead of relying solely on `.well-known`
+    /// discovery at the index URL.
+    ///
+    /// ```toml
+    /// [[tool.uv.index]]
+    /// name = "my-index"
+    /// url = "https://example.com/pypi/simple"
+    ///
+    /// [tool.uv.index.oidc]
+    /// issuer = "https://auth.example.com"
+    /// client-id = "my-app"
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oidc: Option<OidcConfig>,
     /// Status codes that uv should ignore when deciding whether
     /// to continue searching in the next index after a failure.
     ///
@@ -266,6 +284,7 @@ impl PartialEq for Index {
             format,
             publish_url,
             authenticate,
+            oidc,
             ignore_error_codes,
             cache_control,
             exclude_newer,
@@ -277,6 +296,7 @@ impl PartialEq for Index {
             && *format == other.format
             && *publish_url == other.publish_url
             && *authenticate == other.authenticate
+            && *oidc == other.oidc
             && *ignore_error_codes == other.ignore_error_codes
             && *cache_control == other.cache_control
             && *exclude_newer == other.exclude_newer
@@ -302,6 +322,7 @@ impl Ord for Index {
             format,
             publish_url,
             authenticate,
+            oidc,
             ignore_error_codes,
             cache_control,
             exclude_newer,
@@ -313,6 +334,7 @@ impl Ord for Index {
             .then_with(|| format.cmp(&other.format))
             .then_with(|| publish_url.cmp(&other.publish_url))
             .then_with(|| authenticate.cmp(&other.authenticate))
+            .then_with(|| oidc.cmp(&other.oidc))
             .then_with(|| ignore_error_codes.cmp(&other.ignore_error_codes))
             .then_with(|| cache_control.cmp(&other.cache_control))
             .then_with(|| exclude_newer.cmp(&other.exclude_newer))
@@ -330,6 +352,7 @@ impl std::hash::Hash for Index {
             format,
             publish_url,
             authenticate,
+            oidc,
             ignore_error_codes,
             cache_control,
             exclude_newer,
@@ -341,6 +364,7 @@ impl std::hash::Hash for Index {
         format.hash(state);
         publish_url.hash(state);
         authenticate.hash(state);
+        oidc.hash(state);
         ignore_error_codes.hash(state);
         cache_control.hash(state);
         exclude_newer.hash(state);
@@ -382,6 +406,7 @@ impl Index {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             cache_control: None,
             exclude_newer: None,
@@ -399,6 +424,7 @@ impl Index {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             cache_control: None,
             exclude_newer: None,
@@ -416,6 +442,7 @@ impl Index {
             format: IndexFormat::Flat,
             publish_url: None,
             authenticate: AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             cache_control: None,
             exclude_newer: None,
@@ -529,6 +556,7 @@ impl From<IndexUrl> for Index {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             cache_control: None,
             exclude_newer: None,
@@ -554,6 +582,7 @@ impl FromStr for Index {
                     format: IndexFormat::Simple,
                     publish_url: None,
                     authenticate: AuthPolicy::default(),
+                    oidc: None,
                     ignore_error_codes: None,
                     cache_control: None,
                     exclude_newer: None,
@@ -572,6 +601,7 @@ impl FromStr for Index {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             cache_control: None,
             exclude_newer: None,
@@ -676,6 +706,8 @@ struct IndexWire {
     #[serde(default)]
     authenticate: AuthPolicy,
     #[serde(default)]
+    oidc: Option<OidcConfig>,
+    #[serde(default)]
     ignore_error_codes: Option<Vec<SerializableStatusCode>>,
     #[serde(default)]
     cache_control: Option<IndexCacheControl>,
@@ -706,6 +738,7 @@ impl<'de> Deserialize<'de> for Index {
             format: wire.format,
             publish_url: wire.publish_url,
             authenticate: wire.authenticate,
+            oidc: wire.oidc,
             ignore_error_codes: wire.ignore_error_codes,
             cache_control: wire.cache_control,
             exclude_newer: wire.exclude_newer,

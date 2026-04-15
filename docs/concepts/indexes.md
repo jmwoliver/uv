@@ -212,6 +212,37 @@ authenticate = "always"
 When `authenticate` is set to `always`, uv will eagerly search for credentials and error if
 credentials cannot be found.
 
+### Authenticating via OIDC device authorization
+
+For indexes that support OpenID Connect (OIDC), uv can authenticate using the OAuth 2.0 Device
+Authorization Grant ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628)) — the "go to a URL
+and enter a code" flow used by many CLI tools.
+
+When you run `uv auth login <url>` against an index, uv will probe
+`<url>/.well-known/openid-configuration` for device authorization endpoints and, if discovery
+succeeds, drive the device flow to obtain a bearer token that is stored alongside any other
+credentials.
+
+For indexes whose OIDC provider lives on a different domain (e.g., Azure DevOps Artifacts uses
+Microsoft Entra at `login.microsoftonline.com`), the issuer URL, client ID, and scope can be
+configured per-index under `[tool.uv.index.oidc]`:
+
+```toml hl_lines="6 7 8 9"
+[[tool.uv.index]]
+name = "azure-feed"
+url = "https://pkgs.dev.azure.com/<ORGANIZATION>/<PROJECT>/_packaging/<FEED>/pypi/simple/"
+authenticate = "always"
+
+[tool.uv.index.oidc]
+issuer = "https://login.microsoftonline.com/<TENANT_ID>/v2.0"
+client-id = "d5a56ea4-7369-46b8-a538-c370805301bf"
+scope = "499b84ac-1321-427f-aa17-267ca6975798/.default"
+```
+
+The same values can be passed via `--issuer`, `--client-id`, and `--scope` on `uv auth login`, which
+take precedence over the TOML configuration. See
+[`uv auth login`](./authentication/cli.md#logging-in-with-oidc-device-authorization) for details.
+
 ### Ignoring error codes when searching across indexes
 
 When using the [first-index strategy](#searching-across-multiple-indexes), uv will stop searching
