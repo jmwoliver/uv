@@ -68,10 +68,22 @@ pub(crate) async fn token(
         AuthBackend::TextStore(store, _lock) => store
             .get_credentials(url, Some(&username))?
             .cloned()
+            // If no credentials found with __token__ username, try without username
+            // to find bearer tokens (which have no username)
+            .or(if username == "__token__" {
+                store.get_credentials(url, None)?.cloned()
+            } else {
+                None
+            })
             .ok_or_else(|| anyhow::anyhow!("Failed to fetch credentials for {display_url}"))?,
     };
 
-    let Some(password) = credentials.password() else {
+    // Handle both Basic (password) and Bearer (token) credential types
+    let token_value = match &credentials {
+        Credentials::Basic { .. } => credentials.password().map(str::to_string),
+        Credentials::Bearer { token } => String::from_utf8(token.as_slice().to_vec()).ok(),
+    };
+    let Some(token_value) = token_value else {
         bail!(
             "No {} found for {display_url}",
             if username != "__token__" {
@@ -82,7 +94,7 @@ pub(crate) async fn token(
         );
     };
 
-    writeln!(printer.stdout(), "{password}")?;
+    writeln!(printer.stdout(), "{token_value}")?;
     Ok(ExitStatus::Success)
 }
 

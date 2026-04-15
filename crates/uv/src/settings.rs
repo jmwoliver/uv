@@ -4429,16 +4429,49 @@ pub(crate) struct AuthLoginSettings {
     pub(crate) username: Option<String>,
     pub(crate) password: Option<String>,
     pub(crate) token: Option<String>,
+    pub(crate) issuer: Option<url::Url>,
+    pub(crate) client_id: Option<String>,
+    pub(crate) scope: Option<String>,
 }
 
 impl AuthLoginSettings {
     /// Resolve the [`AuthLoginSettings`] from the CLI and filesystem configuration.
-    pub(crate) fn resolve(args: AuthLoginArgs) -> Self {
+    ///
+    /// CLI flags (`--issuer`, `--client-id`, `--scope`) take priority over TOML configuration.
+    /// If not provided on CLI, the OIDC config is looked up from any matching
+    /// `[[tool.uv.index]]` entry whose URL shares the same origin as the service URL.
+    pub(crate) fn resolve(args: AuthLoginArgs, filesystem: Option<&FilesystemOptions>) -> Self {
+        // Look up OIDC config from matching index in workspace configuration
+        let index_oidc = filesystem
+            .and_then(|fs| fs.top_level.index.as_ref())
+            .and_then(|indexes| {
+                let service_url = args.service.url();
+                indexes.iter().find_map(|index| {
+                    let index_url = index.url.url();
+                    // Match if the service URL and index URL share the same origin
+                    if index_url.origin() == service_url.origin() {
+                        index.oidc.clone()
+                    } else {
+                        None
+                    }
+                })
+            });
+
         Self {
             service: args.service,
             username: args.username,
             password: args.password,
             token: args.token,
+            // CLI flags take priority over TOML config
+            issuer: args
+                .issuer
+                .or(index_oidc.as_ref().and_then(|c| c.issuer.clone())),
+            client_id: args
+                .client_id
+                .or(index_oidc.as_ref().and_then(|c| c.client_id.clone())),
+            scope: args
+                .scope
+                .or(index_oidc.as_ref().and_then(|c| c.scope.clone())),
         }
     }
 }
