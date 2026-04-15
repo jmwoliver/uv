@@ -11,6 +11,7 @@ use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand};
 use clap::{ValueEnum, ValueHint};
 
+use url::Url;
 use uv_audit::service::VulnerabilityServiceFormat;
 use uv_auth::Service;
 use uv_cache::CacheArgs;
@@ -6750,6 +6751,30 @@ pub struct AuthLoginArgs {
         env = EnvVars::UV_KEYRING_PROVIDER,
     )]
     pub keyring_provider: Option<KeyringProviderType>,
+
+    /// The OIDC issuer URL for device authorization login.
+    ///
+    /// When provided, OIDC discovery is performed at
+    /// `<issuer>/.well-known/openid-configuration` instead of at the service URL.
+    ///
+    /// This is required for services where the OIDC provider is on a different
+    /// domain than the package index (e.g., Azure, Google).
+    #[arg(long, value_hint = ValueHint::Url)]
+    pub issuer: Option<Url>,
+
+    /// The `OAuth2` client ID for OIDC device authorization.
+    ///
+    /// Defaults to `"uv"` if not specified. Some OIDC providers require a
+    /// pre-registered client ID.
+    #[arg(long)]
+    pub client_id: Option<String>,
+
+    /// The `OAuth2` scope(s) to request during OIDC device authorization.
+    ///
+    /// Space-separated list. Defaults to `"openid"` if not specified.
+    /// Different providers require different scopes.
+    #[arg(long)]
+    pub scope: Option<String>,
 }
 
 #[derive(Args)]

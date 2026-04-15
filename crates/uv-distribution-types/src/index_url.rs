@@ -763,6 +763,7 @@ mod tests {
                 format: IndexFormat::Simple,
                 publish_url: None,
                 authenticate: uv_auth::AuthPolicy::default(),
+                oidc: None,
                 ignore_error_codes: None,
                 exclude_newer: None,
             },
@@ -776,6 +777,7 @@ mod tests {
                 format: IndexFormat::Simple,
                 publish_url: None,
                 authenticate: uv_auth::AuthPolicy::default(),
+                oidc: None,
                 ignore_error_codes: None,
                 exclude_newer: None,
             },
@@ -815,6 +817,7 @@ mod tests {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: uv_auth::AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             exclude_newer: None,
         }];
@@ -862,6 +865,7 @@ mod tests {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: uv_auth::AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             exclude_newer: None,
         }];
@@ -905,6 +909,7 @@ mod tests {
             format: IndexFormat::Simple,
             publish_url: None,
             authenticate: uv_auth::AuthPolicy::default(),
+            oidc: None,
             ignore_error_codes: None,
             exclude_newer: None,
         }];
