@@ -8,12 +8,13 @@ use uuid::Uuid;
 
 use uv_auth::{
     AccessToken, AuthBackend, Credentials, PyxJwt, PyxOAuthTokens, PyxTokenStore, PyxTokens,
-    Service, TextCredentialStore, is_default_pyx_domain,
+    Service, TextCredentialStore, is_default_pyx_domain, oidc,
 };
 use uv_client::{AuthIntegration, BaseClient, BaseClientBuilder};
 use uv_distribution_types::IndexUrl;
 use uv_pep508::VerbatimUrl;
 use uv_preview::Preview;
+use uv_redacted::DisplaySafeUrl;
 
 use crate::commands::ExitStatus;
 use crate::printer::Printer;
@@ -27,6 +28,9 @@ pub(crate) async fn login(
     username: Option<String>,
     password: Option<String>,
     token: Option<String>,
+    issuer: Option<Url>,
+    client_id: Option<String>,
+    scope: Option<String>,
     client_builder: BaseClientBuilder<'_>,
     printer: Printer,
     preview: Preview,
@@ -69,6 +73,39 @@ pub(crate) async fn login(
         Some(root) => (Service::try_from(root.clone())?, root),
         None => (service, url),
     };
+
+    // If no explicit credentials are provided, attempt OIDC device authorization
+    // via .well-known discovery (or explicit --issuer / --client-id / --scope flags).
+    if username.is_none() && password.is_none() && token.is_none() {
+        let client = client_builder
+            .auth_integration(AuthIntegration::NoAuthMiddleware)
+            .build()?;
+
+        // Use the --issuer URL for discovery if provided, otherwise probe the service URL
+        let discovery_url = issuer.as_ref().unwrap_or(service.url());
+        if let Some(discovery) = oidc::discover(client.raw_client(), discovery_url).await? {
+            return oidc_device_flow(
+                &discovery,
+                client.raw_client(),
+                discovery_url,
+                &service,
+                backend,
+                client_id.as_deref(),
+                scope.as_deref(),
+                printer,
+            )
+            .await;
+        }
+
+        // If --issuer was explicitly provided but discovery failed, that's an error
+        if issuer.is_some() || client_id.is_some() || scope.is_some() {
+            bail!(
+                "OIDC discovery failed at `{discovery_url}`. \
+                 Ensure the server exposes `/.well-known/openid-configuration`."
+            );
+        }
+        // Otherwise, fall through to username/password prompt
+    }
 
     // Extract credentials from URL if present
     let url_credentials = Credentials::from_url(&url);
@@ -244,4 +281,80 @@ pub(crate) async fn pyx_login_with_browser(
     store.write(&credentials).await?;
 
     Ok(AccessToken::from(credentials))
+}
+
+/// Perform the OIDC device authorization flow (RFC 8628) and store the resulting token.
+async fn oidc_device_flow(
+    discovery: &oidc::OidcDiscoveryDocument,
+    client: &reqwest::Client,
+    base_url: &Url,
+    service: &Service,
+    backend: AuthBackend,
+    client_id: Option<&str>,
+    scope: Option<&str>,
+    printer: Printer,
+) -> Result<ExitStatus> {
+    let pkce = oidc::generate_pkce();
+
+    let device_response =
+        oidc::device_authorize(client, base_url, discovery, &pkce, client_id, scope).await?;
+
+    // Display the user code and verification URI
+    writeln!(
+        printer.stderr(),
+        "Open {} and enter code: {}",
+        device_response.verification_uri.cyan().bold(),
+        device_response.user_code.bold(),
+    )?;
+
+    // Try to open the browser (use verification_uri_complete if available)
+    let browser_url = device_response
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or(&device_response.verification_uri);
+    match open::that(browser_url) {
+        Ok(()) => {}
+        Err(..) => {
+            writeln!(
+                printer.stderr(),
+                "Could not open browser automatically. Please open the URL above manually."
+            )?;
+        }
+    }
+
+    // Poll for the token
+    let token_response = oidc::poll_for_token(
+        client,
+        base_url,
+        discovery,
+        &device_response,
+        &pkce,
+        client_id,
+    )
+    .await?;
+
+    // Per RFC 6749 Section 5.1, a successful token response must include access_token.
+    let Some(bearer_token) = token_response.access_token else {
+        bail!("Server did not return an access_token in the device flow response");
+    };
+
+    // Store as Bearer credential
+    let display_url = DisplaySafeUrl::from(base_url.clone());
+    let credentials = Credentials::bearer(bearer_token.into_bytes());
+    match backend {
+        AuthBackend::System(provider) => {
+            provider.store(&display_url, &credentials).await?;
+        }
+        AuthBackend::TextStore(mut store, lock) => {
+            store.insert(service.clone(), credentials);
+            store.write(TextCredentialStore::default_file()?, lock)?;
+        }
+    }
+
+    writeln!(
+        printer.stderr(),
+        "Stored credentials for {}",
+        display_url.without_credentials().to_string().bold().cyan()
+    )?;
+    Ok(ExitStatus::Success)
 }

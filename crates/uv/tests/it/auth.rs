@@ -2316,3 +2316,61 @@ fn login_pyx_staging_with_env_var() {
     "
     );
 }
+
+/// `uv auth login --issuer <url>` errors when the issuer does not expose
+/// `.well-known/openid-configuration`.
+#[tokio::test]
+async fn login_oidc_explicit_issuer_discovery_404() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let context = uv_test::test_context_with_versions!(&[]).with_real_home();
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    uv_snapshot!(context.filters(), context.auth_login()
+        .arg(server.uri())
+        .arg("--issuer")
+        .arg(server.uri()), @r"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+
+    ----- stderr -----
+    error: OIDC discovery failed at `http://[LOCALHOST]/`. Ensure the server exposes `/.well-known/openid-configuration`.
+    ");
+}
+
+/// When discovery returns 404 and no `--issuer`/`--username`/`--password`/`--token` is
+/// provided, `uv auth login` falls through to the username/password prompt path. With
+/// no terminal attached, that surfaces as the no-username error -- demonstrating the
+/// OIDC discovery is opportunistic, not required.
+#[tokio::test]
+async fn login_oidc_implicit_discovery_falls_through() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let context = uv_test::test_context_with_versions!(&[]).with_real_home();
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    uv_snapshot!(context.filters(), context.auth_login()
+        .arg(server.uri()), @r"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+
+    ----- stderr -----
+    error: No username provided; did you mean to provide `--username` or `--token`?
+    ");
+}

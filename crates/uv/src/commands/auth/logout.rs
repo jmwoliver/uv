@@ -71,9 +71,13 @@ pub(crate) async fn logout(
                 .with_context(|| format!("Unable to remove credentials for {display_url}"))?;
         }
         AuthBackend::TextStore(mut store, _lock) => {
+            // Try removing with the specified username first, then fall back
+            // to removing with no username (for bearer credentials which have
+            // no associated username).
             if store
                 .remove(&service, Username::from(Some(username.clone())))
                 .is_none()
+                && store.remove(&service, Username::from(None)).is_none()
             {
                 bail!("No matching entry found for {display_url}");
             }
